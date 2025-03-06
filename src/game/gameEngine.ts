@@ -11,6 +11,7 @@ export class GameEngine {
   private lastUpdateTime: number = 0;
   private running: boolean = false;
   private pendingInputs: { sequence: number; input: Record<string, boolean> }[] = [];
+  private animationFrameId: number | null = null;
   
   // Rendering callback
   private renderCallback: ((players: Player[], stage: StageData | null) => void) | null = null;
@@ -41,14 +42,14 @@ export class GameEngine {
     this.gameState = state;
     this.running = true;
     this.lastUpdateTime = performance.now();
+    this.pendingInputs = [];
     
     console.log("Game engine initialized with players:", this.players);
     
-    // Force-start the game loop
-    if (this.running) {
+    // Force-start the game loop if it's not already running
+    if (this.running && !this.animationFrameId) {
       console.log("Starting game loop");
-      // Use setTimeout to ensure the game engine is fully initialized first
-      setTimeout(() => this.gameLoop(), 100);
+      this.gameLoop();
     }
   }
   
@@ -57,6 +58,11 @@ export class GameEngine {
    */
   setRenderCallback(callback: (players: Player[], stage: StageData | null) => void) {
     this.renderCallback = callback;
+    
+    // If we have players data, trigger an initial render
+    if (this.players.length > 0 && callback) {
+      callback(this.players, this.stage);
+    }
   }
   
   /**
@@ -65,13 +71,18 @@ export class GameEngine {
   setStage(stage: StageData) {
     this.stage = stage;
     physicsEngine.setStage(stage);
+    
+    // Trigger a render with the new stage
+    if (this.renderCallback) {
+      this.renderCallback(this.players, this.stage);
+    }
   }
   
   /**
    * Updates the game state with server updates
    */
   handleServerUpdate(data: { players: Player[], timestamp: number }) {
-    // Update all other players
+    // Update all players
     data.players.forEach(serverPlayer => {
       if (serverPlayer.id !== this.localPlayerId) {
         // Find and update the player in our local state
@@ -119,6 +130,11 @@ export class GameEngine {
         }
       }
     });
+    
+    // Ensure we're rendering with updated players
+    if (this.renderCallback) {
+      this.renderCallback(this.players, this.stage);
+    }
   }
   
   /**
@@ -134,7 +150,7 @@ export class GameEngine {
     const playerIndex = this.players.findIndex(p => p.id === this.localPlayerId);
     if (playerIndex === -1) return;
     
-    // Send input to server
+    // Send input to server (if connected)
     const sequence = socketService.sendInput(input);
     
     // Store the input for client-side prediction
@@ -182,36 +198,29 @@ export class GameEngine {
   private gameLoop() {
     if (!this.running) {
       console.warn("Game loop called but game is not running");
+      this.animationFrameId = null;
       return;
     }
     
     // Calculate delta time
     const currentTime = performance.now();
-    const deltaTime = (currentTime - this.lastUpdateTime) / 1000; // convert to seconds
+    // We're using a fixed time step here to simplify the physics
+    // deltaTime is used in updatePlayerPhysics calls above
     this.lastUpdateTime = currentTime;
-    
-    console.log("Game loop running, players:", this.players.length, "deltaTime:", deltaTime.toFixed(4));
     
     // Handle input for local player
     this.handleInput();
     
     // Process attacks (only for client-side prediction)
-    if (this.localPlayerId) {
-      this.processAttacks();
-    }
+    this.processAttacks();
     
     // Render the game state
     if (this.renderCallback) {
-      console.log("Calling render callback with", this.players.length, "players");
       this.renderCallback(this.players, this.stage);
-    } else {
-      console.error("No render callback set!");
     }
     
     // Continue the game loop
-    if (this.running) {
-      requestAnimationFrame(() => this.gameLoop());
-    }
+    this.animationFrameId = requestAnimationFrame(() => this.gameLoop());
   }
   
   /**
@@ -219,6 +228,11 @@ export class GameEngine {
    */
   stop() {
     this.running = false;
+    
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
   }
   
   /**
@@ -230,6 +244,21 @@ export class GameEngine {
       stage: this.stage,
     };
   }
+  
+  /**
+   * Restart the game loop if it's not running
+   */
+  restart() {
+    if (!this.running && this.players.length > 0) {
+      this.running = true;
+      this.lastUpdateTime = performance.now();
+      this.gameLoop();
+    }
+  }
 }
 
-export default new GameEngine();
+// Create a singleton instance
+const gameEngine = new GameEngine();
+
+// Export the instance as default
+export default gameEngine;

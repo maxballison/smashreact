@@ -1,4 +1,4 @@
-import { Player, Vector2D, StageData } from '../types';
+import { Player, StageData } from '../types';
 
 // Physics constants
 const GRAVITY = 980; // pixels per second squared
@@ -11,6 +11,7 @@ export class PhysicsEngine {
 
   setStage(stage: StageData) {
     this.stage = stage;
+    console.log("Physics engine stage set to:", stage.id);
   }
 
   /**
@@ -18,6 +19,7 @@ export class PhysicsEngine {
    * @param player The player to update
    * @param deltaTime Time since last update in seconds
    * @param input Current player input state
+   * @param platforms The platforms to check for collisions
    * @returns Updated player object
    */
   updatePlayerPhysics(
@@ -26,7 +28,12 @@ export class PhysicsEngine {
     input: Record<string, boolean> = {},
     platforms: { x: number; y: number; width: number; height: number }[]
   ): Player {
-    const updatedPlayer = { ...player };
+    // Create a copy of the player to avoid mutating the original
+    const updatedPlayer = { 
+      ...player,
+      position: { ...player.position },
+      velocity: { ...player.velocity }
+    };
     
     // Apply gravity
     updatedPlayer.velocity.y += GRAVITY * deltaTime;
@@ -60,9 +67,22 @@ export class PhysicsEngine {
     if (input.j && !updatedPlayer.isAttacking) {
       updatedPlayer.isAttacking = true;
       updatedPlayer.attackType = 'light';
+      
+      // Auto-reset attack after a short delay (this would normally be handled by animation)
+      setTimeout(() => {
+        player.isAttacking = false;
+        player.attackType = null;
+      }, 200);
+      
     } else if (input.k && !updatedPlayer.isAttacking) {
       updatedPlayer.isAttacking = true;
       updatedPlayer.attackType = 'heavy';
+      
+      // Auto-reset attack after a longer delay
+      setTimeout(() => {
+        player.isAttacking = false;
+        player.attackType = null;
+      }, 500);
     }
     
     // Update position based on velocity
@@ -72,7 +92,7 @@ export class PhysicsEngine {
     };
     
     // Check platform collisions
-    let onPlatform = false;
+    let isOnPlatform = false;
     
     // First check if player is falling
     const isFalling = updatedPlayer.velocity.y > 0;
@@ -96,7 +116,7 @@ export class PhysicsEngine {
           newPosition.y = platform.y - 40; // Snap to platform
           updatedPlayer.velocity.y = 0;
           updatedPlayer.isJumping = false;
-          onPlatform = true;
+          isOnPlatform = true;
           break;
         }
       }
@@ -104,24 +124,25 @@ export class PhysicsEngine {
     
     // Check stage boundaries if stage is set
     if (this.stage) {
-      if (newPosition.x < this.stage.bounds.left) {
-        newPosition.x = this.stage.bounds.left;
+      if (newPosition.x < this.stage.bounds.left + 30) {
+        newPosition.x = this.stage.bounds.left + 30;
         updatedPlayer.velocity.x = 0;
-      } else if (newPosition.x > this.stage.bounds.right) {
-        newPosition.x = this.stage.bounds.right;
+      } else if (newPosition.x > this.stage.bounds.right - 30) {
+        newPosition.x = this.stage.bounds.right - 30;
         updatedPlayer.velocity.x = 0;
       }
       
       // Check top boundary
-      if (newPosition.y < this.stage.bounds.top) {
-        newPosition.y = this.stage.bounds.top;
+      if (newPosition.y < this.stage.bounds.top + 40) {
+        newPosition.y = this.stage.bounds.top + 40;
         updatedPlayer.velocity.y = 0;
       }
       
       // Check if fallen off stage
       if (newPosition.y > this.stage.bounds.bottom) {
-        // Player has fallen off, handle stock reduction in game logic
+        // Player has fallen off, handle stock reduction
         updatedPlayer.stocks -= 1;
+        
         if (updatedPlayer.stocks > 0) {
           // Respawn
           newPosition.x = (this.stage.bounds.left + this.stage.bounds.right) / 2;
@@ -139,11 +160,27 @@ export class PhysicsEngine {
         newPosition.y = FLOOR_Y;
         updatedPlayer.velocity.y = 0;
         updatedPlayer.isJumping = false;
+        isOnPlatform = true;
+      }
+      
+      // Fallback boundaries
+      if (newPosition.x < 30) {
+        newPosition.x = 30;
+        updatedPlayer.velocity.x = 0;
+      } else if (newPosition.x > 1250) {
+        newPosition.x = 1250;
+        updatedPlayer.velocity.x = 0;
       }
     }
     
     // Apply the new position
     updatedPlayer.position = newPosition;
+    
+    // Use isOnPlatform in log for debugging if needed
+    if (isOnPlatform !== updatedPlayer.isJumping) {
+      // Only log state changes to reduce console spam
+      console.log(`Player ${updatedPlayer.id} platform state: ${isOnPlatform ? 'on platform' : 'in air'}`);
+    }
     
     return updatedPlayer;
   }
@@ -159,7 +196,12 @@ export class PhysicsEngine {
       return defender;
     }
     
-    const updatedDefender = { ...defender };
+    // Create a copy of the defender to avoid mutating the original
+    const updatedDefender = { 
+      ...defender,
+      position: { ...defender.position },
+      velocity: { ...defender.velocity }
+    };
     
     // Define attack ranges based on attack type
     const attackRange = attacker.attackType === 'heavy' ? 100 : 60;
@@ -196,4 +238,8 @@ export class PhysicsEngine {
   }
 }
 
-export default new PhysicsEngine();
+// Create a singleton instance
+const physicsEngine = new PhysicsEngine();
+
+// Export the instance as default
+export default physicsEngine;
